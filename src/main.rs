@@ -5,15 +5,18 @@ use winit::{
     event::{Event, WindowEvent},
     event_loop::{ControlFlow, EventLoop},
     window::WindowBuilder,
+    dpi::LogicalSize,
 };
-use winit::window::Window;
 
-const WIDTH: u32 = 800;
-const SIZE: u32 = 600;
+const WIDTH: u32 = 1024;
+const HEIGHT: u32 = 768;
 
 fn main() {
     let event_loop = EventLoop::new();
-    let window = WindowBuilder::new().build(&event_loop).unwrap();
+    let _window = WindowBuilder::new()
+        .with_title("Vulkan")
+        .with_inner_size(LogicalSize::new(f64::from(WIDTH), f64::from(HEIGHT)))
+        .build(&event_loop);
 
     event_loop.run(move |event, _, control_flow| {
         *control_flow = ControlFlow::Poll;
