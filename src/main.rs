@@ -5,7 +5,7 @@ use winit::{
     dpi::LogicalSize,
     event::{Event, WindowEvent},
     event_loop::{ControlFlow, EventLoop},
-    window::{WindowBuilder},
+    window::{WindowBuilder}
 };
 
 const WIDTH: u32 = 640;
