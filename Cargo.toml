@@ -1,5 +1,5 @@
 [package]
-name = "untitled"
+name = "vulkan-drh"
 version = "0.1.0"
 authors = ["drh"]
 edition = "2018"

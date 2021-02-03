@@ -8,8 +8,8 @@ use winit::{
     window::{WindowBuilder},
 };
 
-const WIDTH: u32 = 1024;
-const HEIGHT: u32 = 768;
+const WIDTH: u32 = 640;
+const HEIGHT: u32 = 480;
 
 fn main() {
     let event_loop = EventLoop::new();
