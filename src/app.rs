@@ -1,13 +1,5 @@
-use vulkano::instance::{
-    Instance,
-    InstanceExtensions,
-    ApplicationInfo,
-    Version,
-    layers_list,
-    debug::{DebugCallback, MessageType}
-};
+use vulkano::instance::{Instance, InstanceExtensions, ApplicationInfo, Version, layers_list, debug::{DebugCallback, MessageType, MessageSeverity}, PhysicalDevice};
 use std::sync::Arc;
-use vulkano::instance::debug::MessageSeverity;
 
 const VALIDATION_LAYERS: &[&str] = &[
     "VK_LAYER_KHRONOS_validation"
@@ -18,23 +10,25 @@ const ENABLE_VALIDATION_LAYERS: bool = true;
 #[cfg(not(debug_assertions))]
 const ENABLE_VALIDATION_LAYERS: bool = false;
 
-pub struct App {
-    instance: Arc<Instance>,
-    debug_callback: Option<DebugCallback>
+pub struct App<'a> {
+    vulkan_instance: &'a Arc<Instance>,
+    debug_callback: Option<DebugCallback>,
+    physical_device: PhysicalDevice<'a>
 }
 
-impl App {
-    pub fn new() -> Self {
-        let instance = Self::create_vulkan_instance();
-        let debug_callback = Self::create_debug_callback(&instance);
+impl<'a> App<'a> {
+    pub fn new(vulkan_instance: &'a Arc<Instance>) -> Self {
+        let debug_callback = Self::create_debug_callback(vulkan_instance);
+        let physical_device = Self::select_device(vulkan_instance);
 
         Self {
-            instance,
-            debug_callback
+            vulkan_instance: &vulkan_instance,
+            debug_callback,
+            physical_device
         }
     }
 
-    fn create_vulkan_instance() -> Arc<Instance> {
+    pub fn create_vulkan_instance() -> Arc<Instance> {
         let validation_layers_supported = Self::check_validation_layer_support();
         if ENABLE_VALIDATION_LAYERS && !validation_layers_supported {
             println!("Validation layers requested but not available!")
@@ -92,5 +86,16 @@ impl App {
         DebugCallback::new(&instance, severity,msg_types, |msg| {
             println!("Validation layer: {:?}", msg.description);
         }).ok()
+    }
+
+    fn select_device(instance: &'a Arc<Instance>) -> PhysicalDevice<'a> {
+        let device = PhysicalDevice::enumerate(&instance).next().unwrap();
+
+        println!(
+            "Using device: {} (type: {:?})",
+            device.name(),
+            device.ty()
+        );
+        device
     }
 }

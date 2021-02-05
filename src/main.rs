@@ -14,11 +14,11 @@ const HEIGHT: u32 = 480;
 fn main() {
     let event_loop = EventLoop::new();
     let _window = WindowBuilder::new()
-        .with_title("Vulkan")
+        .with_title("Vulkan App")
         .with_inner_size(LogicalSize::new(f64::from(WIDTH), f64::from(HEIGHT)))
         .build(&event_loop);
-
-    let _app = App::new();
+    let vulkan_instance = App::create_vulkan_instance();
+    let _app = App::new(&vulkan_instance);
 
     event_loop.run(move |event, _, control_flow| {
         *control_flow = ControlFlow::Poll;

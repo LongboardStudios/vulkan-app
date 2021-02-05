@@ -23,7 +23,7 @@ If this is not present, the app will panic with error:
 
 ### Linux (work in progress)
 1. Make sure you have Vulkan drivers installed.
-2. Install deps.
+2. Install deps (vulkan sdk, cmake, etc.)
 
 ### Windows (currently untested)
 TODO
@@ -34,6 +34,6 @@ TODO
 ## Notes
 The project uses wininit for window and events.
 
-Vulkano is used for a pleasant rust Vulkan experience, at the cost of ultra-fine-grained tweaking ability.
+Vulkano is used for a pleasant rust Vulkan experience, at the cost of ultra-fine-grained tweaking ability. For example, [this method of debugging instance creation and destruction](https://vulkan-tutorial.com/Drawing_a_triangle/Setup/Validation_layers#page_Debugging-instance-creation-and-destruction) is not currently possible with Vulkano.
 
-A CLion project configuration is included, and this is the recommended development setup.
+A CLion project configuration is included, and this is the recommended development setup on all platforms.
