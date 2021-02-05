@@ -1,5 +1,19 @@
-use vulkano::instance::{Instance, InstanceExtensions, ApplicationInfo, Version, layers_list, debug::{DebugCallback, MessageType, MessageSeverity}, PhysicalDevice, QueueFamily};
 use std::sync::Arc;
+
+use vulkano::instance::{
+    Instance,
+    InstanceExtensions,
+    ApplicationInfo,
+    Version,
+    layers_list,
+    debug::{
+        DebugCallback,
+        MessageType,
+        MessageSeverity
+    },
+    PhysicalDevice
+};
+use vulkano::device::{Device, Features, DeviceExtensions, Queue};
 
 const VALIDATION_LAYERS: &[&str] = &[
     "VK_LAYER_KHRONOS_validation"
@@ -10,21 +24,27 @@ const ENABLE_VALIDATION_LAYERS: bool = true;
 #[cfg(not(debug_assertions))]
 const ENABLE_VALIDATION_LAYERS: bool = false;
 
+#[allow(unused)]
 pub struct App<'a> {
     vulkan_instance: &'a Arc<Instance>,
     debug_callback: Option<DebugCallback>,
-    physical_device: PhysicalDevice<'a>
+    physical_device: PhysicalDevice<'a>,
+    device: Arc<Device>,
+    graphics_queue: Arc<Queue>
 }
 
 impl<'a> App<'a> {
     pub fn new(vulkan_instance: &'a Arc<Instance>) -> Self {
         let debug_callback = Self::create_debug_callback(vulkan_instance);
         let physical_device = Self::select_device(vulkan_instance);
+        let (device, graphics_queue) = Self::create_logical_device(vulkan_instance, physical_device);
 
         Self {
             vulkan_instance: &vulkan_instance,
             debug_callback,
-            physical_device
+            physical_device,
+            device,
+            graphics_queue
         }
     }
 
@@ -106,5 +126,23 @@ impl<'a> App<'a> {
             if family.supports_graphics() { return true }
         }
         false
+    }
+
+    fn create_logical_device(instance: &Arc<Instance>, physical_device: PhysicalDevice) -> (Arc<Device>, Arc<Queue>) {
+        let queue_family = physical_device.queue_families().find(|queue| {
+            queue.supports_graphics()
+        })
+        .unwrap();
+        let queue_priority = 1.0;
+
+        let (device, mut queues) = Device::new(
+            physical_device,
+            &Features::none(),
+            &DeviceExtensions::none(),
+            [(queue_family, queue_priority)].iter().cloned())
+            .expect("Failed to create logical device!");
+
+        let graphics_queue = queues.next().unwrap();
+        (device, graphics_queue)
     }
 }
