@@ -1,4 +1,4 @@
-use vulkano::instance::{Instance, InstanceExtensions, ApplicationInfo, Version, layers_list, debug::{DebugCallback, MessageType, MessageSeverity}, PhysicalDevice};
+use vulkano::instance::{Instance, InstanceExtensions, ApplicationInfo, Version, layers_list, debug::{DebugCallback, MessageType, MessageSeverity}, PhysicalDevice, QueueFamily};
 use std::sync::Arc;
 
 const VALIDATION_LAYERS: &[&str] = &[
@@ -89,7 +89,9 @@ impl<'a> App<'a> {
     }
 
     fn select_device(instance: &'a Arc<Instance>) -> PhysicalDevice<'a> {
-        let device = PhysicalDevice::enumerate(&instance).next().unwrap();
+        let device = PhysicalDevice::enumerate(&instance)
+            .find(|device| Self::is_vulkan_compatible(device))
+            .expect("Failed to find a Vulkan-compatible device");
 
         println!(
             "Using device: {} (type: {:?})",
@@ -97,5 +99,12 @@ impl<'a> App<'a> {
             device.ty()
         );
         device
+    }
+
+    fn is_vulkan_compatible(device: &PhysicalDevice) -> bool {
+        for (_, family) in device.queue_families().enumerate() {
+            if family.supports_graphics() { return true }
+        }
+        false
     }
 }
