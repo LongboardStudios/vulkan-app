@@ -22,7 +22,7 @@ fn main() {
         .build_vk_surface(&event_loop, vulkan_instance.clone())
         .expect("Failed to create window surface!");
 
-    let app = App::new(&vulkan_instance, &surface);
+    let mut app = App::new(&vulkan_instance, &surface);
 
     event_loop.run(move |event, _, control_flow| {
         *control_flow = ControlFlow::Poll;
@@ -36,7 +36,7 @@ fn main() {
                 *control_flow = ControlFlow::Exit
             },
             Event::MainEventsCleared => {
-                // render here
+                &app.draw_frame();
             },
             _ => ()
         }

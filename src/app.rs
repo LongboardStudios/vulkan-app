@@ -14,20 +14,10 @@ use vulkano::instance::{
     PhysicalDevice
 };
 use vulkano::device::{Device, Features, DeviceExtensions, Queue};
-use vulkano::swapchain::{
-    Surface,
-    Swapchain,
-    ColorSpace,
-    SupportedPresentModes,
-    PresentMode,
-    Capabilities,
-    SurfaceTransform,
-    CompositeAlpha,
-    FullscreenExclusive
-};
+use vulkano::swapchain::{Surface, Swapchain, ColorSpace, SupportedPresentModes, PresentMode, Capabilities, SurfaceTransform, CompositeAlpha, FullscreenExclusive, acquire_next_image};
 use vulkano::image::{SwapchainImage, ImageUsage};
 use vulkano::format::Format;
-use vulkano::sync::SharingMode;
+use vulkano::sync::{SharingMode, GpuFuture};
 use vulkano::pipeline::viewport::Viewport;
 use vulkano::pipeline::GraphicsPipeline;
 use vulkano::pipeline::vertex::{BufferlessDefinition, BufferlessVertices};
@@ -387,5 +377,21 @@ impl<'a> App<'a> {
                 )
             })
             .collect()
+    }
+
+    pub fn draw_frame(&mut self) {
+        let (image_index, _, acquire_future) = acquire_next_image(self.swapchain.clone(), None)
+            .expect("Failed to acquire next image!");
+
+        let command_buffer = self.command_buffers[image_index].clone();
+
+        let future = acquire_future
+            .then_execute(self.graphics_queue.clone(), command_buffer)
+            .expect("Fail!")
+            .then_swapchain_present(self.presentation_queue.clone(), self.swapchain.clone(), image_index)
+            .then_signal_fence_and_flush()
+            .expect("Sig feil!");
+
+        future.wait(None).expect("Failed to wait!");
     }
 }
