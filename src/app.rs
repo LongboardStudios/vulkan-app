@@ -14,8 +14,17 @@ use vulkano::instance::{
     PhysicalDevice
 };
 use vulkano::device::{Device, Features, DeviceExtensions, Queue};
-use vulkano::swapchain::{Surface, Swapchain, ColorSpace, SupportedPresentModes, PresentMode, Capabilities, SurfaceTransform, CompositeAlpha, FullscreenExclusive};
-use winit::window::Window;
+use vulkano::swapchain::{
+    Surface,
+    Swapchain,
+    ColorSpace,
+    SupportedPresentModes,
+    PresentMode,
+    Capabilities,
+    SurfaceTransform,
+    CompositeAlpha,
+    FullscreenExclusive
+};
 use vulkano::image::{SwapchainImage, ImageUsage};
 use vulkano::format::Format;
 use vulkano::sync::SharingMode;
@@ -23,8 +32,11 @@ use vulkano::pipeline::viewport::Viewport;
 use vulkano::pipeline::GraphicsPipeline;
 use vulkano::pipeline::vertex::BufferlessDefinition;
 use vulkano::command_buffer::DynamicState;
-use vulkano::framebuffer::RenderPassAbstract;
+use vulkano::framebuffer::{RenderPassAbstract, Subpass};
 use vulkano::single_pass_renderpass;
+use winit::window::Window;
+use vulkano::descriptor::PipelineLayoutAbstract;
+
 
 const VALIDATION_LAYERS: &[&str] = &[
     //"VK_LAYER_LUNARG_standard_validation"
@@ -36,6 +48,8 @@ const ENABLE_VALIDATION_LAYERS: bool = false;
 #[cfg(not(debug_assertions))]
 const ENABLE_VALIDATION_LAYERS: bool = false;
 
+type ConcreteGraphicsPipeline = GraphicsPipeline<BufferlessDefinition, Box<PipelineLayoutAbstract + Send + Sync + 'static>, Arc<RenderPassAbstract + Send + Sync + 'static>>;
+
 #[allow(unused)]
 pub struct App<'a> {
     vulkan_instance: &'a Arc<Instance>,
@@ -46,7 +60,8 @@ pub struct App<'a> {
     presentation_queue: Arc<Queue>,
     swapchain: Arc<Swapchain<Window>>,
     swapchain_images: Vec<Arc<SwapchainImage<Window>>>,
-    render_pass: Arc<RenderPassAbstract + Send + Sync>
+    render_pass: Arc<RenderPassAbstract + Send + Sync>,
+    graphics_pipeline: Arc<ConcreteGraphicsPipeline>
 }
 
 impl<'a> App<'a> {
@@ -62,7 +77,7 @@ impl<'a> App<'a> {
                                    &graphics_queue,
                                    &presentation_queue);
         let render_pass = Self::create_render_pass(&device, swapchain.format());
-        Self::create_graphics_pipeline(&device, swapchain.dimensions());
+        let graphics_pipeline = Self::create_graphics_pipeline(&device, swapchain.dimensions(), &render_pass);
 
         Self {
             vulkan_instance: &vulkan_instance,
@@ -73,7 +88,8 @@ impl<'a> App<'a> {
             presentation_queue,
             swapchain,
             swapchain_images,
-            render_pass
+            render_pass,
+            graphics_pipeline
         }
     }
 
@@ -252,7 +268,27 @@ impl<'a> App<'a> {
         surface.window().inner_size().into()
     }
 
-    fn create_graphics_pipeline(device: &Arc<Device>, swap_chain_extent: [u32; 2]) {
+    fn create_render_pass(device: &Arc<Device>, color_format: Format) -> Arc<RenderPassAbstract + Send + Sync> {
+        Arc::new(single_pass_renderpass!(device.clone(),
+            attachments: {
+                color: {
+                    load: Clear,
+                    store: Store,
+                    format: color_format,
+                    samples: 1,
+                }
+            },
+            pass: {
+                color: [color],
+                depth_stencil: {}
+            }
+        ).expect("Failed to create render pass!"))
+    }
+
+    fn create_graphics_pipeline(device: &Arc<Device>,
+                                swap_chain_extent: [u32; 2],
+                                render_pass: &Arc<RenderPassAbstract + Send + Sync>
+    ) -> Arc<ConcreteGraphicsPipeline> {
         mod vertex_shader {
             vulkano_shaders::shader! {
                 ty: "vertex",
@@ -280,7 +316,16 @@ impl<'a> App<'a> {
             depth_range: 0.0 .. 1.0
         };
 
-        let _pipeline_builder = Arc::new(GraphicsPipeline::start()
+        let mut dynamic_state = DynamicState {
+            line_width: None,
+            viewports: None,
+            scissors: None,
+            compare_mask: None,
+            write_mask: None,
+            reference: None
+        };
+
+        Arc::new(GraphicsPipeline::start()
             .vertex_input(BufferlessDefinition {})
             .vertex_shader(vert_shader_module.main_entry_point(), ())
             .triangle_list()
@@ -293,32 +338,9 @@ impl<'a> App<'a> {
             .cull_mode_back()
             .front_face_clockwise()
             .blend_pass_through()
-        );
-
-        let mut dynamic_state = DynamicState {
-            line_width: None,
-            viewports: None,
-            scissors: None,
-            compare_mask: None,
-            write_mask: None,
-            reference: None
-        };
-    }
-
-    fn create_render_pass(device: &Arc<Device>, color_format: Format) -> Arc<RenderPassAbstract + Send + Sync> {
-        Arc::new(single_pass_renderpass!(device.clone(),
-            attachments: {
-                color: {
-                    load: Clear,
-                    store: Store,
-                    format: color_format,
-                    samples: 1,
-                }
-            },
-            pass: {
-                color: [color],
-                depth_stencil: {}
-            }
-        ).expect("Failed to create render pass!"))
+            .render_pass(Subpass::from(render_pass.clone(), 0).expect("Failed to create subpass!"))
+            .build(device.clone())
+            .expect("Failed to create graphics pipeline!")
+        )
     }
 }
