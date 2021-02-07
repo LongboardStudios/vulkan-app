@@ -14,8 +14,11 @@ use vulkano::instance::{
     PhysicalDevice
 };
 use vulkano::device::{Device, Features, DeviceExtensions, Queue};
-use vulkano::swapchain::Surface;
+use vulkano::swapchain::{Surface, Swapchain, ColorSpace, SupportedPresentModes, PresentMode, Capabilities, SurfaceTransform, CompositeAlpha, FullscreenExclusive};
 use winit::window::Window;
+use vulkano::image::{SwapchainImage, ImageUsage};
+use vulkano::format::Format;
+use vulkano::sync::SharingMode;
 
 const VALIDATION_LAYERS: &[&str] = &[
     //"VK_LAYER_LUNARG_standard_validation"
@@ -34,7 +37,9 @@ pub struct App<'a> {
     physical_device: PhysicalDevice<'a>,
     device: Arc<Device>,
     graphics_queue: Arc<Queue>,
-    presentation_queue: Arc<Queue>
+    presentation_queue: Arc<Queue>,
+    swapchain: Arc<Swapchain<Window>>,
+    swapchain_images: Vec<Arc<SwapchainImage<Window>>>
 }
 
 impl<'a> App<'a> {
@@ -42,6 +47,13 @@ impl<'a> App<'a> {
         let debug_callback = Self::create_debug_callback(vulkan_instance);
         let physical_device = Self::select_device(vulkan_instance, surface);
         let (device, graphics_queue, presentation_queue) = Self::create_logical_device(vulkan_instance, physical_device);
+        let (swapchain, swapchain_images) =
+            Self::create_swapchain(vulkan_instance,
+                                   surface,
+                                   physical_device,
+                                   &device,
+                                   &graphics_queue,
+                                   &presentation_queue);
 
         Self {
             vulkan_instance: &vulkan_instance,
@@ -49,7 +61,9 @@ impl<'a> App<'a> {
             physical_device,
             device,
             graphics_queue,
-            presentation_queue
+            presentation_queue,
+            swapchain,
+            swapchain_images
         }
     }
 
@@ -159,5 +173,72 @@ impl<'a> App<'a> {
             khr_swapchain: true,
             ..DeviceExtensions::none()
         }
+    }
+
+    fn create_swapchain(
+        instance: &Arc<Instance>,
+        surface: &Arc<Surface<Window>>,
+        physical_device: PhysicalDevice,
+        logical_device: &Arc<Device>,
+        graphics_queue: &Arc<Queue>,
+        present_queue: &Arc<Queue>
+    ) -> (Arc<Swapchain<Window>>, Vec<Arc<SwapchainImage<Window>>>) {
+        let capabilities = surface.capabilities(physical_device)
+            .expect("Failed to get capabilities from device");
+        let surface_format = Self::select_swap_surface_format(&capabilities.supported_formats);
+        let present_mode = Self::select_swap_present_mode(capabilities.present_modes);
+        let extent = Self::select_swap_extent(&surface);
+
+        let mut image_count = capabilities.min_image_count + 1;
+        let max_image_count = capabilities.max_image_count.expect("Failed to get max image count!");
+        if image_count > max_image_count {
+            image_count = max_image_count;
+        }
+
+        let image_usage = ImageUsage {
+            color_attachment: true,
+            .. ImageUsage::none()
+        };
+
+        let sharing_mode: SharingMode = vec![graphics_queue, present_queue].as_slice().into();
+
+        let (swapchain, images) = Swapchain::new(
+            logical_device.clone(),
+            surface.clone(),
+            image_count,
+            surface_format.0,
+            extent,
+            1,
+            image_usage,
+            sharing_mode,
+            SurfaceTransform::Identity,
+            CompositeAlpha::Opaque,
+            present_mode,
+            FullscreenExclusive::Default,
+            true,
+            surface_format.1
+        ).expect("Failed to create swapchain!");
+
+        (swapchain, images)
+    }
+
+    fn select_swap_surface_format(formats: &[(Format, ColorSpace)]) -> (Format, ColorSpace) {
+        *formats.iter().find(|(format, color_space)|
+            *format == Format::B8G8R8A8Unorm && *color_space == ColorSpace::SrgbNonLinear
+        ).unwrap_or_else(|| &formats.first().expect("No surface formats found!"))
+    }
+
+    fn select_swap_present_mode(available_modes: SupportedPresentModes) -> PresentMode {
+        if available_modes.mailbox {
+            PresentMode::Mailbox
+        } else if available_modes.immediate {
+            PresentMode::Immediate
+        } else {
+            PresentMode::Fifo
+        }
+    }
+
+    fn select_swap_extent(surface: &Arc<Surface<Window>>) -> [u32; 2] {
+        surface.window().inner_size().into()
     }
 }
