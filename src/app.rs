@@ -22,6 +22,9 @@ use vulkano::sync::SharingMode;
 use vulkano::pipeline::viewport::Viewport;
 use vulkano::pipeline::GraphicsPipeline;
 use vulkano::pipeline::vertex::BufferlessDefinition;
+use vulkano::command_buffer::DynamicState;
+use vulkano::framebuffer::RenderPassAbstract;
+use vulkano::single_pass_renderpass;
 
 const VALIDATION_LAYERS: &[&str] = &[
     //"VK_LAYER_LUNARG_standard_validation"
@@ -42,7 +45,8 @@ pub struct App<'a> {
     graphics_queue: Arc<Queue>,
     presentation_queue: Arc<Queue>,
     swapchain: Arc<Swapchain<Window>>,
-    swapchain_images: Vec<Arc<SwapchainImage<Window>>>
+    swapchain_images: Vec<Arc<SwapchainImage<Window>>>,
+    render_pass: Arc<RenderPassAbstract + Send + Sync>
 }
 
 impl<'a> App<'a> {
@@ -57,6 +61,7 @@ impl<'a> App<'a> {
                                    &device,
                                    &graphics_queue,
                                    &presentation_queue);
+        let render_pass = Self::create_render_pass(&device, swapchain.format());
         Self::create_graphics_pipeline(&device, swapchain.dimensions());
 
         Self {
@@ -67,7 +72,8 @@ impl<'a> App<'a> {
             graphics_queue,
             presentation_queue,
             swapchain,
-            swapchain_images
+            swapchain_images,
+            render_pass
         }
     }
 
@@ -288,5 +294,31 @@ impl<'a> App<'a> {
             .front_face_clockwise()
             .blend_pass_through()
         );
+
+        let mut dynamic_state = DynamicState {
+            line_width: None,
+            viewports: None,
+            scissors: None,
+            compare_mask: None,
+            write_mask: None,
+            reference: None
+        };
+    }
+
+    fn create_render_pass(device: &Arc<Device>, color_format: Format) -> Arc<RenderPassAbstract + Send + Sync> {
+        Arc::new(single_pass_renderpass!(device.clone(),
+            attachments: {
+                color: {
+                    load: Clear,
+                    store: Store,
+                    format: color_format,
+                    samples: 1,
+                }
+            },
+            pass: {
+                color: [color],
+                depth_stencil: {}
+            }
+        ).expect("Failed to create render pass!"))
     }
 }
