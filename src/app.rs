@@ -14,13 +14,16 @@ use vulkano::instance::{
     PhysicalDevice
 };
 use vulkano::device::{Device, Features, DeviceExtensions, Queue};
+use vulkano::swapchain::Surface;
+use winit::window::Window;
 
 const VALIDATION_LAYERS: &[&str] = &[
+    //"VK_LAYER_LUNARG_standard_validation"
     "VK_LAYER_KHRONOS_validation"
 ];
 
 #[cfg(all(debug_assertions))]
-const ENABLE_VALIDATION_LAYERS: bool = true;
+const ENABLE_VALIDATION_LAYERS: bool = false;
 #[cfg(not(debug_assertions))]
 const ENABLE_VALIDATION_LAYERS: bool = false;
 
@@ -30,21 +33,23 @@ pub struct App<'a> {
     debug_callback: Option<DebugCallback>,
     physical_device: PhysicalDevice<'a>,
     device: Arc<Device>,
-    graphics_queue: Arc<Queue>
+    graphics_queue: Arc<Queue>,
+    presentation_queue: Arc<Queue>
 }
 
 impl<'a> App<'a> {
-    pub fn new(vulkan_instance: &'a Arc<Instance>) -> Self {
+    pub fn new(vulkan_instance: &'a Arc<Instance>, surface: &'a Arc<Surface<Window>>) -> Self {
         let debug_callback = Self::create_debug_callback(vulkan_instance);
-        let physical_device = Self::select_device(vulkan_instance);
-        let (device, graphics_queue) = Self::create_logical_device(vulkan_instance, physical_device);
+        let physical_device = Self::select_device(vulkan_instance, surface);
+        let (device, graphics_queue, presentation_queue) = Self::create_logical_device(vulkan_instance, physical_device);
 
         Self {
             vulkan_instance: &vulkan_instance,
             debug_callback,
             physical_device,
             device,
-            graphics_queue
+            graphics_queue,
+            presentation_queue
         }
     }
 
@@ -65,7 +70,7 @@ impl<'a> App<'a> {
             engine_version: None
         };
 
-        let required_extensions = Self::get_required_extensions();
+        let required_extensions = Self::get_required_instance_extensions();
 
         if ENABLE_VALIDATION_LAYERS && validation_layers_supported {
             Instance::new(Some(&app_info), &required_extensions, VALIDATION_LAYERS.iter().cloned())
@@ -83,7 +88,7 @@ impl<'a> App<'a> {
             .all(|layer_name| layers.contains(&layer_name.to_string()))
     }
 
-    fn get_required_extensions() -> InstanceExtensions {
+    fn get_required_instance_extensions() -> InstanceExtensions {
         let mut required_extensions = vulkano_win::required_extensions();
         if ENABLE_VALIDATION_LAYERS {
             required_extensions.ext_debug_utils = true;
@@ -108,9 +113,9 @@ impl<'a> App<'a> {
         }).ok()
     }
 
-    fn select_device(instance: &'a Arc<Instance>) -> PhysicalDevice<'a> {
+    fn select_device(instance: &'a Arc<Instance>, surface: &'a Arc<Surface<Window>>) -> PhysicalDevice<'a> {
         let device = PhysicalDevice::enumerate(&instance)
-            .find(|device| Self::is_vulkan_compatible(device))
+            .find(|device| Self::is_vulkan_compatible(device, &surface))
             .expect("Failed to find a Vulkan-compatible device");
 
         println!(
@@ -121,28 +126,38 @@ impl<'a> App<'a> {
         device
     }
 
-    fn is_vulkan_compatible(device: &PhysicalDevice) -> bool {
+    fn is_vulkan_compatible(device: &PhysicalDevice, surface: &'a Arc<Surface<Window>>) -> bool {
         for (_, family) in device.queue_families().enumerate() {
-            if family.supports_graphics() { return true }
+            if family.supports_graphics() && surface.is_supported(family).unwrap_or(false) { return true }
         }
         false
     }
 
-    fn create_logical_device(instance: &Arc<Instance>, physical_device: PhysicalDevice) -> (Arc<Device>, Arc<Queue>) {
+    fn create_logical_device(instance: &Arc<Instance>, physical_device: PhysicalDevice) -> (Arc<Device>, Arc<Queue>, Arc<Queue>) {
         let queue_family = physical_device.queue_families().find(|queue| {
             queue.supports_graphics()
         })
-        .unwrap();
+        .expect("Couldn't find a graphical queue family!");
+
         let queue_priority = 1.0;
+        let required_extensions = &Self::get_required_device_extensions(&physical_device);
 
         let (device, mut queues) = Device::new(
             physical_device,
-            &Features::none(),
-            &DeviceExtensions::none(),
+            physical_device.supported_features(),
+            required_extensions,
             [(queue_family, queue_priority)].iter().cloned())
             .expect("Failed to create logical device!");
 
         let graphics_queue = queues.next().unwrap();
-        (device, graphics_queue)
+        let presentation_queue = queues.next().unwrap_or_else(|| graphics_queue.clone());
+        (device, graphics_queue, presentation_queue)
+    }
+
+    fn get_required_device_extensions(physical_device: &PhysicalDevice) -> DeviceExtensions {
+        DeviceExtensions {
+            khr_swapchain: true,
+            ..DeviceExtensions::none()
+        }
     }
 }
