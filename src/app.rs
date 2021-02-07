@@ -224,7 +224,7 @@ impl<'a> App<'a> {
 
     fn select_swap_surface_format(formats: &[(Format, ColorSpace)]) -> (Format, ColorSpace) {
         *formats.iter().find(|(format, color_space)|
-            *format == Format::B8G8R8A8Unorm && *color_space == ColorSpace::SrgbNonLinear
+            *format == Format::B8G8R8A8Srgb && *color_space == ColorSpace::SrgbNonLinear
         ).unwrap_or_else(|| &formats.first().expect("No surface formats found!"))
     }
 
