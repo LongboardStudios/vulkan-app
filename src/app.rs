@@ -54,6 +54,7 @@ impl<'a> App<'a> {
                                    &device,
                                    &graphics_queue,
                                    &presentation_queue);
+        Self::create_graphics_pipeline(&device);
 
         Self {
             vulkan_instance: &vulkan_instance,
@@ -240,5 +241,9 @@ impl<'a> App<'a> {
 
     fn select_swap_extent(surface: &Arc<Surface<Window>>) -> [u32; 2] {
         surface.window().inner_size().into()
+    }
+
+    fn create_graphics_pipeline(_device: &Arc<Device>) {
+
     }
 }
