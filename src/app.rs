@@ -30,8 +30,8 @@ use vulkano::format::Format;
 use vulkano::sync::SharingMode;
 use vulkano::pipeline::viewport::Viewport;
 use vulkano::pipeline::GraphicsPipeline;
-use vulkano::pipeline::vertex::BufferlessDefinition;
-use vulkano::command_buffer::DynamicState;
+use vulkano::pipeline::vertex::{BufferlessDefinition, BufferlessVertices};
+use vulkano::command_buffer::{DynamicState, AutoCommandBuffer, AutoCommandBufferBuilder, SubpassContents};
 use vulkano::framebuffer::{RenderPassAbstract, Subpass, FramebufferAbstract, Framebuffer};
 use vulkano::single_pass_renderpass;
 use winit::window::Window;
@@ -62,7 +62,8 @@ pub struct App<'a> {
     swapchain_images: Vec<Arc<SwapchainImage<Window>>>,
     render_pass: Arc<dyn RenderPassAbstract + Send + Sync>,
     graphics_pipeline: Arc<ConcreteGraphicsPipeline>,
-    swapchain_framebuffers: Vec<Arc<dyn FramebufferAbstract + Send + Sync>>
+    swapchain_framebuffers: Vec<Arc<dyn FramebufferAbstract + Send + Sync>>,
+    command_buffers: Vec<Arc<AutoCommandBuffer>>
 }
 
 impl<'a> App<'a> {
@@ -80,6 +81,7 @@ impl<'a> App<'a> {
         let render_pass = Self::create_render_pass(&device, swapchain.format());
         let graphics_pipeline = Self::create_graphics_pipeline(&device, swapchain.dimensions(), &render_pass);
         let swapchain_framebuffers = Self::create_framebuffers(&swapchain_images, &render_pass);
+        let command_buffers = Self::create_command_buffers(&device, &graphics_queue, &swapchain_framebuffers, &graphics_pipeline);
 
         Self {
             vulkan_instance: &vulkan_instance,
@@ -92,7 +94,8 @@ impl<'a> App<'a> {
             swapchain_images,
             render_pass,
             graphics_pipeline,
-            swapchain_framebuffers
+            swapchain_framebuffers,
+            command_buffers
         }
     }
 
@@ -359,5 +362,30 @@ impl<'a> App<'a> {
                 ) as Arc<dyn FramebufferAbstract + Send + Sync>
             }
             ).collect::<Vec<_>>()
+    }
+
+    fn create_command_buffers(device: &Arc<Device>,
+                              graphics_queue: &Arc<Queue>,
+                              swapchain_framebuffers: &Vec<Arc<dyn FramebufferAbstract + Send + Sync>>,
+                              graphics_pipeline: &Arc<ConcreteGraphicsPipeline>
+    ) -> Vec<Arc<AutoCommandBuffer>> {
+        let queue_family = graphics_queue.family();
+        swapchain_framebuffers.iter()
+            .map(|framebuffer| {
+                let vertices = BufferlessVertices { vertices: 3, instances: 1 };
+                let mut builder = AutoCommandBufferBuilder::primary_simultaneous_use(device.clone(), queue_family)
+                    .expect("Failed to create auto command buffer builder");
+                builder
+                    .begin_render_pass(framebuffer.clone(), SubpassContents::Inline, vec![[0.0, 0.0, 0.0, 1.0].into()])
+                    .expect("Failed to begin render pass!")
+                    .draw(graphics_pipeline.clone(), &DynamicState::none(), vertices, (), ())
+                    .expect("Failed to draw!")
+                    .end_render_pass()
+                    .expect("Failed to end render pass!");
+                Arc::new(builder.build()
+                    .expect("Failed to build auto command buffer")
+                )
+            })
+            .collect()
     }
 }
