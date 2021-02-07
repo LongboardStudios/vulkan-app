@@ -243,7 +243,27 @@ impl<'a> App<'a> {
         surface.window().inner_size().into()
     }
 
-    fn create_graphics_pipeline(_device: &Arc<Device>) {
+    fn create_graphics_pipeline(device: &Arc<Device>) {
+        mod vertex_shader {
+            vulkano_shaders::shader! {
+                ty: "vertex",
+                path: "src/static_triangle.vert"
+            }
+        }
+
+        mod fragment_shader {
+            vulkano_shaders::shader! {
+                ty: "fragment",
+                path: "src/vertex_colors.frag"
+            }
+        }
+
+        let _vert_shader_module = vertex_shader::Shader::load(device.clone())
+            .expect("Failed to create vertex shader module!");
+
+        let _frag_shader_module = fragment_shader::Shader::load(device.clone())
+            .expect("Failed to create fragment shader module!");
+
 
     }
 }
