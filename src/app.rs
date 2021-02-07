@@ -32,7 +32,7 @@ use vulkano::pipeline::viewport::Viewport;
 use vulkano::pipeline::GraphicsPipeline;
 use vulkano::pipeline::vertex::BufferlessDefinition;
 use vulkano::command_buffer::DynamicState;
-use vulkano::framebuffer::{RenderPassAbstract, Subpass};
+use vulkano::framebuffer::{RenderPassAbstract, Subpass, FramebufferAbstract, Framebuffer};
 use vulkano::single_pass_renderpass;
 use winit::window::Window;
 use vulkano::descriptor::PipelineLayoutAbstract;
@@ -60,8 +60,9 @@ pub struct App<'a> {
     presentation_queue: Arc<Queue>,
     swapchain: Arc<Swapchain<Window>>,
     swapchain_images: Vec<Arc<SwapchainImage<Window>>>,
-    render_pass: Arc<RenderPassAbstract + Send + Sync>,
-    graphics_pipeline: Arc<ConcreteGraphicsPipeline>
+    render_pass: Arc<dyn RenderPassAbstract + Send + Sync>,
+    graphics_pipeline: Arc<ConcreteGraphicsPipeline>,
+    swapchain_framebuffers: Vec<Arc<dyn FramebufferAbstract + Send + Sync>>
 }
 
 impl<'a> App<'a> {
@@ -78,6 +79,7 @@ impl<'a> App<'a> {
                                    &presentation_queue);
         let render_pass = Self::create_render_pass(&device, swapchain.format());
         let graphics_pipeline = Self::create_graphics_pipeline(&device, swapchain.dimensions(), &render_pass);
+        let swapchain_framebuffers = Self::create_framebuffers(&swapchain_images, &render_pass);
 
         Self {
             vulkan_instance: &vulkan_instance,
@@ -89,7 +91,8 @@ impl<'a> App<'a> {
             swapchain,
             swapchain_images,
             render_pass,
-            graphics_pipeline
+            graphics_pipeline,
+            swapchain_framebuffers
         }
     }
 
@@ -287,7 +290,7 @@ impl<'a> App<'a> {
 
     fn create_graphics_pipeline(device: &Arc<Device>,
                                 swap_chain_extent: [u32; 2],
-                                render_pass: &Arc<RenderPassAbstract + Send + Sync>
+                                render_pass: &Arc<dyn RenderPassAbstract + Send + Sync>
     ) -> Arc<ConcreteGraphicsPipeline> {
         mod vertex_shader {
             vulkano_shaders::shader! {
@@ -316,15 +319,6 @@ impl<'a> App<'a> {
             depth_range: 0.0 .. 1.0
         };
 
-        let mut dynamic_state = DynamicState {
-            line_width: None,
-            viewports: None,
-            scissors: None,
-            compare_mask: None,
-            write_mask: None,
-            reference: None
-        };
-
         Arc::new(GraphicsPipeline::start()
             .vertex_input(BufferlessDefinition {})
             .vertex_shader(vert_shader_module.main_entry_point(), ())
@@ -342,5 +336,28 @@ impl<'a> App<'a> {
             .build(device.clone())
             .expect("Failed to create graphics pipeline!")
         )
+    }
+
+    fn create_framebuffers(swapchain_images: &[Arc<SwapchainImage<Window>>],
+                           render_pass: &Arc<dyn RenderPassAbstract + Send + Sync>
+    ) -> Vec<Arc<dyn FramebufferAbstract + Send + Sync>> {
+
+        let mut dynamic_state = DynamicState {
+            line_width: None,
+            viewports: None,
+            scissors: None,
+            compare_mask: None,
+            write_mask: None,
+            reference: None
+        };
+
+        swapchain_images.iter()
+            .map(|image| {
+                Arc::new(Framebuffer::start(render_pass.clone())
+                    .add(image.clone()).expect("Failed to add image!")
+                    .build().expect("Failed to build")
+                ) as Arc<dyn FramebufferAbstract + Send + Sync>
+            }
+            ).collect::<Vec<_>>()
     }
 }
