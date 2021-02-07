@@ -19,6 +19,9 @@ use winit::window::Window;
 use vulkano::image::{SwapchainImage, ImageUsage};
 use vulkano::format::Format;
 use vulkano::sync::SharingMode;
+use vulkano::pipeline::viewport::Viewport;
+use vulkano::pipeline::GraphicsPipeline;
+use vulkano::pipeline::vertex::BufferlessDefinition;
 
 const VALIDATION_LAYERS: &[&str] = &[
     //"VK_LAYER_LUNARG_standard_validation"
@@ -54,7 +57,7 @@ impl<'a> App<'a> {
                                    &device,
                                    &graphics_queue,
                                    &presentation_queue);
-        Self::create_graphics_pipeline(&device);
+        Self::create_graphics_pipeline(&device, swapchain.dimensions());
 
         Self {
             vulkan_instance: &vulkan_instance,
@@ -243,7 +246,7 @@ impl<'a> App<'a> {
         surface.window().inner_size().into()
     }
 
-    fn create_graphics_pipeline(device: &Arc<Device>) {
+    fn create_graphics_pipeline(device: &Arc<Device>, swap_chain_extent: [u32; 2]) {
         mod vertex_shader {
             vulkano_shaders::shader! {
                 ty: "vertex",
@@ -258,12 +261,32 @@ impl<'a> App<'a> {
             }
         }
 
-        let _vert_shader_module = vertex_shader::Shader::load(device.clone())
+        let vert_shader_module = vertex_shader::Shader::load(device.clone())
             .expect("Failed to create vertex shader module!");
 
-        let _frag_shader_module = fragment_shader::Shader::load(device.clone())
+        let frag_shader_module = fragment_shader::Shader::load(device.clone())
             .expect("Failed to create fragment shader module!");
 
+        let dimensions = [swap_chain_extent[0] as f32, swap_chain_extent[1] as f32];
+        let viewport = Viewport {
+            origin: [0.0, 0.0],
+            dimensions,
+            depth_range: 0.0 .. 1.0
+        };
 
+        let _pipeline_builder = Arc::new(GraphicsPipeline::start()
+            .vertex_input(BufferlessDefinition {})
+            .vertex_shader(vert_shader_module.main_entry_point(), ())
+            .triangle_list()
+            .primitive_restart(false)
+            .viewports(vec![viewport])
+            .fragment_shader(frag_shader_module.main_entry_point(), ())
+            .depth_clamp(false)
+            .polygon_mode_fill()
+            .line_width(1.0)
+            .cull_mode_back()
+            .front_face_clockwise()
+            .blend_pass_through()
+        );
     }
 }
