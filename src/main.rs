@@ -14,13 +14,14 @@ use vulkano::instance::{
     PhysicalDevice
 };
 use vulkano::device::{Device, DeviceExtensions, Queue};
-use vulkano::swapchain::{Surface, Swapchain, ColorSpace, SupportedPresentModes, PresentMode, SurfaceTransform, CompositeAlpha, FullscreenExclusive, acquire_next_image};
+use vulkano::swapchain::{Surface, Swapchain, ColorSpace, SupportedPresentModes, PresentMode, SurfaceTransform, CompositeAlpha, FullscreenExclusive, acquire_next_image, AcquireError, SwapchainCreationError};
 use vulkano::image::{SwapchainImage, ImageUsage};
 use vulkano::format::Format;
-use vulkano::sync::{SharingMode, GpuFuture};
+use vulkano::sync;
+use vulkano::sync::{SharingMode, GpuFuture, FlushError};
 use vulkano::pipeline::viewport::Viewport;
 use vulkano::pipeline::GraphicsPipeline;
-use vulkano::pipeline::vertex::{BufferlessDefinition, BufferlessVertices};
+use vulkano::pipeline::vertex::{BufferlessDefinition, BufferlessVertices, SingleBufferDefinition};
 use vulkano::command_buffer::{DynamicState, AutoCommandBuffer, AutoCommandBufferBuilder, SubpassContents};
 use vulkano::framebuffer::{RenderPassAbstract, Subpass, FramebufferAbstract, Framebuffer};
 use vulkano::single_pass_renderpass;
@@ -41,12 +42,6 @@ const ENABLE_VALIDATION_LAYERS: bool = false;
 #[cfg(not(debug_assertions))]
 const ENABLE_VALIDATION_LAYERS: bool = false;
 
-type ConcreteGraphicsPipeline = GraphicsPipeline<
-    BufferlessDefinition,
-    Box<dyn PipelineLayoutAbstract + Send + Sync + 'static>,
-    Arc<dyn RenderPassAbstract + Send + Sync + 'static>
->;
-
 const WIDTH: u32 = 1024;
 const HEIGHT: u32 = 768;
 
@@ -61,7 +56,7 @@ fn main() {
     let _debug_callback = create_debug_callback(&vulkan_instance);
     let physical_device = select_device(&vulkan_instance, &surface);
     let (device, graphics_queue, presentation_queue) = create_logical_device(physical_device);
-    let (swapchain, swapchain_images) =
+    let (mut swapchain, swapchain_images) =
         create_swapchain(&surface,
                          physical_device,
                          &device,
@@ -69,8 +64,21 @@ fn main() {
                          &presentation_queue);
     let render_pass = create_render_pass(&device, swapchain.format());
     let graphics_pipeline = create_graphics_pipeline(&device, swapchain.dimensions(), &render_pass);
-    let swapchain_framebuffers = create_framebuffers(&swapchain_images, &render_pass);
-    let command_buffers = create_command_buffers(&device, &graphics_queue, &swapchain_framebuffers, &graphics_pipeline);
+
+    let mut dynamic_state = DynamicState {
+        line_width: None,
+        viewports: None,
+        scissors: None,
+        compare_mask: None,
+        write_mask: None,
+        reference: None,
+    };
+
+    let mut swapchain_framebuffers = create_framebuffers(&swapchain_images, &render_pass, &mut dynamic_state);
+    let command_buffers = create_command_buffers(&device, &graphics_queue, &swapchain_framebuffers, &graphics_pipeline, &mut dynamic_state);
+
+    let mut need_to_recreate_swapchain = false;
+    let mut previous_frame_end = Some(sync::now(device.clone()).boxed());
 
     event_loop.run(move |event, _, control_flow| {
         *control_flow = ControlFlow::Poll;
@@ -82,22 +90,64 @@ fn main() {
             } => {
                 println!("The close button was pressed!");
                 *control_flow = ControlFlow::Exit
-            },
-            Event::MainEventsCleared => {
-                let (image_index, _, acquire_future) = acquire_next_image(swapchain.clone(), None)
-                    .expect("Failed to acquire next image!");
+            }
+            Event::WindowEvent {
+                event: WindowEvent::Resized(_),
+                ..
+            } => {
+                need_to_recreate_swapchain = true;
+            }
+            Event::RedrawEventsCleared => {
+                previous_frame_end.as_mut().unwrap().cleanup_finished();
+
+                if need_to_recreate_swapchain {
+                    let dimensions: [u32; 2] = surface.window().inner_size().into();
+                    let (new_swapchain, new_images) =
+                        match swapchain.recreate_with_dimensions(dimensions) {
+                            Ok(r) => r,
+                            Err(SwapchainCreationError::UnsupportedDimensions) => return,
+                            Err(e) => panic!("Failed to recreate swapchain! {:?}", e)
+                        };
+                    swapchain = new_swapchain;
+                    swapchain_framebuffers = create_framebuffers(&new_images, &render_pass.clone(), &mut dynamic_state);
+                    need_to_recreate_swapchain = false;
+                }
+
+                let (image_index, suboptimal, acquire_future) =
+                    match acquire_next_image(swapchain.clone(), None) {
+                        Ok(r) => r,
+                        Err(AcquireError::OutOfDate) => {
+                            need_to_recreate_swapchain = true;
+                            return;
+                        }
+                        Err(e) => panic!("Failed to acquire next image! {:?}", e)
+                    };
 
                 let command_buffer = command_buffers[image_index].clone();
 
-                let future = acquire_future
+                let future = previous_frame_end
+                    .take()
+                    .expect("Failed to take!")
+                    .join(acquire_future)
                     .then_execute(graphics_queue.clone(), command_buffer)
-                    .expect("Fail!")
+                    .expect("Failed to execute!")
                     .then_swapchain_present(presentation_queue.clone(), swapchain.clone(), image_index)
-                    .then_signal_fence_and_flush()
-                    .expect("Sig feil!");
+                    .then_signal_fence_and_flush();
 
-                future.wait(None).expect("Failed to wait!");
-            },
+                match future {
+                    Ok(future) => {
+                        previous_frame_end = Some(future.boxed());
+                    }
+                    Err(FlushError::OutOfDate) => {
+                        need_to_recreate_swapchain = true;
+                        previous_frame_end = Some(sync::now(device.clone()).boxed());
+                    }
+                    Err(e) => {
+                        println!("Failed to flush future: {:?}", e);
+                        previous_frame_end = Some(sync::now(device.clone()).boxed());
+                    }
+                }
+            }
             _ => ()
         }
     });
@@ -296,6 +346,12 @@ fn create_render_pass(device: &Arc<Device>, color_format: Format) -> Arc<dyn Ren
         ).expect("Failed to create render pass!"))
 }
 
+type ConcreteGraphicsPipeline = GraphicsPipeline<
+    BufferlessDefinition,
+    Box<dyn PipelineLayoutAbstract + Send + Sync + 'static>,
+    Arc<dyn RenderPassAbstract + Send + Sync + 'static>
+>;
+
 fn create_graphics_pipeline(device: &Arc<Device>,
                             swap_chain_extent: [u32; 2],
                             render_pass: &Arc<dyn RenderPassAbstract + Send + Sync>
@@ -320,49 +376,53 @@ fn create_graphics_pipeline(device: &Arc<Device>,
     let frag_shader_module = fragment_shader::Shader::load(device.clone())
         .expect("Failed to create fragment shader module!");
 
-    let dimensions = [swap_chain_extent[0] as f32, swap_chain_extent[1] as f32];
-    let viewport = Viewport {
-        origin: [0.0, 0.0],
-        dimensions,
-        depth_range: 0.0 .. 1.0
-    };
-
     Arc::new(GraphicsPipeline::start()
         .vertex_input(BufferlessDefinition {})
         .vertex_shader(vert_shader_module.main_entry_point(), ())
         .triangle_list()
-        .primitive_restart(false)
-        .viewports(vec![viewport])
+        .viewports_dynamic_scissors_irrelevant(1)
         .fragment_shader(frag_shader_module.main_entry_point(), ())
         .depth_clamp(false)
-        .polygon_mode_fill()
+        .polygon_mode_line()
         .line_width(1.0)
         .cull_mode_back()
         .front_face_clockwise()
         .blend_pass_through()
-        .render_pass(Subpass::from(render_pass.clone(), 0).expect("Failed to create subpass!"))
+        .render_pass(Subpass::from(render_pass.clone(), 0)
+            .expect("Failed to create subpass!"))
         .build(device.clone())
         .expect("Failed to create graphics pipeline!")
     )
 }
 
 fn create_framebuffers(swapchain_images: &[Arc<SwapchainImage<Window>>],
-                       render_pass: &Arc<dyn RenderPassAbstract + Send + Sync>
+                       render_pass: &Arc<dyn RenderPassAbstract + Send + Sync>,
+                       dynamic_state: &mut DynamicState
 ) -> Vec<Arc<dyn FramebufferAbstract + Send + Sync>> {
+    let dimensions = swapchain_images[0].dimensions();
+
+    let viewport = Viewport {
+        origin: [0.0, 0.0],
+        dimensions: [dimensions[0] as f32, dimensions[1] as f32],
+        depth_range: 0.0..1.0
+    };
+    dynamic_state.viewports = Some(vec![viewport]);
+
     swapchain_images.iter()
         .map(|image| {
             Arc::new(Framebuffer::start(render_pass.clone())
                 .add(image.clone()).expect("Failed to add image!")
                 .build().expect("Failed to build")
             ) as Arc<dyn FramebufferAbstract + Send + Sync>
-        }
-        ).collect::<Vec<_>>()
+        })
+        .collect::<Vec<_>>()
 }
 
 fn create_command_buffers(device: &Arc<Device>,
                           graphics_queue: &Arc<Queue>,
                           swapchain_framebuffers: &Vec<Arc<dyn FramebufferAbstract + Send + Sync>>,
-                          graphics_pipeline: &Arc<ConcreteGraphicsPipeline>
+                          graphics_pipeline: &Arc<ConcreteGraphicsPipeline>,
+                          dynamic_state: &mut DynamicState
 ) -> Vec<Arc<AutoCommandBuffer>> {
     let queue_family = graphics_queue.family();
     swapchain_framebuffers.iter()
@@ -371,9 +431,11 @@ fn create_command_buffers(device: &Arc<Device>,
             let mut builder = AutoCommandBufferBuilder::primary_simultaneous_use(device.clone(), queue_family)
                 .expect("Failed to create auto command buffer builder");
             builder
-                .begin_render_pass(framebuffer.clone(), SubpassContents::Inline, vec![[0.0, 0.0, 0.0, 1.0].into()])
+                .begin_render_pass(framebuffer.clone(),
+                                   SubpassContents::Inline,
+                                   vec![[0.0, 0.0, 0.0, 1.0].into()])
                 .expect("Failed to begin render pass!")
-                .draw(graphics_pipeline.clone(), &DynamicState::none(), vertices, (), ())
+                .draw(graphics_pipeline.clone(), dynamic_state, vertices, (), ())
                 .expect("Failed to draw!")
                 .end_render_pass()
                 .expect("Failed to end render pass!");
