@@ -88,16 +88,16 @@ fn main() {
             false,
             [
                 Vertex {
-                    position: [-0.5, -0.25],
+                    position: [0.0, -0.5],
                     color: [1.0, 0.0, 0.0]
                 },
                 Vertex {
-                    position: [0.0, 0.5],
-                    color: [1.0, 1.0, 0.0]
+                    position: [-0.5, 0.5],
+                    color: [0.0, 1.0, 0.0]
                 },
                 Vertex {
-                    position: [0.0, 0.5],
-                    color: [1.0, 0.0, 1.0]
+                    position: [0.5, 0.5],
+                    color: [0.0, 0.0, 1.0]
                 }
             ].iter().cloned()
         ).expect("Failed to build buffer!")
@@ -132,10 +132,7 @@ fn main() {
         .viewports_dynamic_scissors_irrelevant(1)
         .fragment_shader(frag_shader_module.main_entry_point(), ())
         .depth_clamp(false)
-        .polygon_mode_line()
-        .line_width(1.0)
         .cull_mode_back()
-        .front_face_clockwise()
         .blend_pass_through()
         .render_pass(Subpass::from(render_pass.clone(), 0)
             .expect("Failed to create subpass!"))
