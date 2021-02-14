@@ -32,8 +32,8 @@ use vulkano::format::Format;
 use vulkano::sync;
 use vulkano::sync::{GpuFuture, FlushError};
 use vulkano::pipeline::viewport::Viewport;
-use vulkano::pipeline::GraphicsPipeline;
-use vulkano::command_buffer::{DynamicState, AutoCommandBufferBuilder, SubpassContents};
+use vulkano::pipeline::{GraphicsPipeline, ComputePipeline};
+use vulkano::command_buffer::{DynamicState, AutoCommandBufferBuilder, SubpassContents, CommandBuffer};
 use vulkano::framebuffer::{RenderPassAbstract, Subpass, FramebufferAbstract, Framebuffer};
 use vulkano::single_pass_renderpass;
 use winit::window::{Window, WindowBuilder};
@@ -42,6 +42,8 @@ use winit::event::{WindowEvent, Event};
 use winit::dpi::LogicalSize;
 use vulkano_win::VkSurfaceBuild;
 use vulkano::buffer::{CpuAccessibleBuffer, BufferUsage};
+use vulkano::descriptor::PipelineLayoutAbstract;
+use vulkano::descriptor::descriptor_set::PersistentDescriptorSet;
 
 const VALIDATION_LAYERS: &[&str] = &[
     //"VK_LAYER_LUNARG_standard_validation"
@@ -53,8 +55,8 @@ const ENABLE_VALIDATION_LAYERS: bool = false;
 #[cfg(not(debug_assertions))]
 const ENABLE_VALIDATION_LAYERS: bool = false;
 
-const WIDTH: u32 = 1024;
-const HEIGHT: u32 = 768;
+const WIDTH: u32 = 800;
+const HEIGHT: u32 = 600;
 
 fn main() {
     let vulkan_instance = create_vulkan_instance();
@@ -109,6 +111,8 @@ fn main() {
                 path: "src/unlit_untextured.vert"
             }
     }
+    let vert_shader_module = vertex_shader::Shader::load(device.clone())
+        .expect("Failed to create vertex shader module!");
 
     mod fragment_shader {
         vulkano_shaders::shader! {
@@ -116,12 +120,64 @@ fn main() {
                 path: "src/vertex_colors.frag"
             }
     }
-
-    let vert_shader_module = vertex_shader::Shader::load(device.clone())
-        .expect("Failed to create vertex shader module!");
-
     let frag_shader_module = fragment_shader::Shader::load(device.clone())
         .expect("Failed to create fragment shader module!");
+
+
+    //////////////////////////////////////////////////////////////////////
+    // Start of compute shenanigans
+    let data_iter = 0..65536;
+    let data_buffer = CpuAccessibleBuffer::from_iter(
+        device.clone(),
+        BufferUsage::all(),
+        false,
+        data_iter)
+        .expect("Failed to create data buffer!");
+
+    mod compute_shader {
+        vulkano_shaders::shader! {
+            ty: "compute",
+            path: "src/compute.glsl"
+        }
+    }
+    let compute_shader_module = compute_shader::Shader::load(device.clone())
+        .expect("Failed to load compute shader module!");
+
+    let compute_pipeline = Arc::new(ComputePipeline::new(device.clone(), &compute_shader_module.main_entry_point(), &(), None)
+        .expect("Failed to create compute pipeline!"));
+
+    let pipeline_layout = compute_pipeline.layout().descriptor_set_layout(0).unwrap();
+    let descriptor_set = Arc::new(
+        PersistentDescriptorSet::start(pipeline_layout.clone())
+        .add_buffer(data_buffer.clone()).unwrap()
+        .build().unwrap()
+    );
+
+    let mut buffer_builder = AutoCommandBufferBuilder::primary_one_time_submit(
+        device.clone(),
+        queue.family())
+        .expect("Failed to create command buffer builder");
+    buffer_builder
+        .dispatch([1024, 1, 1],
+                  compute_pipeline.clone(),
+                  descriptor_set.clone(),
+                  ())
+        .unwrap();
+
+    let command_buffer = buffer_builder.build()
+        .expect("Failed to build command buffer!");
+
+    let finished = command_buffer.execute(queue.clone()).unwrap();
+    finished.then_signal_fence_and_flush().unwrap().wait(None).unwrap();
+
+    // Check the computation has been done
+    let buffer_content = data_buffer.read().unwrap();
+    for n in 0..65536u32 {
+        assert_eq!(buffer_content[n as usize], n * 12);
+    }
+    // End of compute shenanigans
+    //////////////////////////////////////////////////////////////////////
+
 
     let render_pass = create_render_pass(&device, swapchain.format());
 
@@ -317,9 +373,13 @@ fn create_debug_callback(instance: &Arc<Instance>) -> Option<DebugCallback> {
 }
 
 fn select_device<'a>(instance: &'a Arc<Instance>, surface: &'a Arc<Surface<Window>>) -> PhysicalDevice<'a> {
-    let device = PhysicalDevice::enumerate(&instance)
-        .find(|device| is_vulkan_compatible(device, &surface))
-        .expect("Failed to find a Vulkan-compatible device");
+    // let device = PhysicalDevice::enumerate(&instance)
+    //     .find(|device| is_vulkan_compatible(device, &surface))
+    //     .expect("Failed to find a Vulkan-compatible device");
+
+    let mut devices = PhysicalDevice::enumerate(&instance);
+    devices.next();
+    let device = devices.next().unwrap();
 
     println!(
         "Using device: {} (type: {:?})",
@@ -359,6 +419,7 @@ fn create_logical_device(physical_device: PhysicalDevice) -> (Arc<Device>, Arc<Q
 fn get_required_device_extensions() -> DeviceExtensions {
     DeviceExtensions {
         khr_swapchain: true,
+        khr_storage_buffer_storage_class: true,
         ..DeviceExtensions::none()
     }
 }
