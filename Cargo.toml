@@ -11,3 +11,5 @@ vulkano = "0.20"
 vulkano-shaders = "0.20"
 winit = "0.24"
 vulkano-win = "0.20"
+
+image = "0.23"

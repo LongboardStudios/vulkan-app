@@ -1,5 +1,7 @@
 use std::sync::Arc;
 
+use image::{ImageBuffer, Rgba};
+
 use vulkano::instance::{
     Instance,
     InstanceExtensions,
@@ -27,8 +29,8 @@ use vulkano::swapchain::{
     AcquireError,
     SwapchainCreationError
 };
-use vulkano::image::{SwapchainImage, ImageUsage};
-use vulkano::format::Format;
+use vulkano::image::{SwapchainImage, ImageUsage, StorageImage, Dimensions};
+use vulkano::format::{Format, ClearValue};
 use vulkano::sync;
 use vulkano::sync::{GpuFuture, FlushError};
 use vulkano::pipeline::viewport::Viewport;
@@ -175,6 +177,43 @@ fn main() {
     for n in 0..65536u32 {
         assert_eq!(buffer_content[n as usize], n * 12);
     }
+
+    let storage_image = StorageImage::new(
+        device.clone(),
+        Dimensions::Dim2d {
+            width: 1024,
+            height: 1024
+        },
+        Format::R8G8B8A8Unorm,
+        Some(queue.family())
+    ).expect("Failed to create storage image!");
+
+    let image_buffer = CpuAccessibleBuffer::from_iter(
+        device.clone(),
+        BufferUsage::all(),
+        false,
+        (0..1024 * 1024 * 4).map(|_| 0u8))
+        .expect("Failed to create image buffer!");
+
+    let mut another_command_buffer_builder = AutoCommandBufferBuilder::primary_one_time_submit(
+        device.clone(),
+        queue.family()
+    ).unwrap();
+    another_command_buffer_builder
+        .clear_color_image(
+        storage_image.clone(),
+        ClearValue::Float([1.0, 0.0, 0.0, 1.0]))
+        .unwrap()
+        .copy_image_to_buffer(
+        storage_image.clone(),
+        image_buffer.clone())
+        .unwrap();
+    let another_command_buffer = another_command_buffer_builder.build().unwrap();
+    let finished2 = another_command_buffer.execute(queue.clone()).unwrap();
+    finished2.then_signal_fence_and_flush().unwrap().wait(None).unwrap();
+    let image_buffer_content = image_buffer.read().unwrap();
+    let image = ImageBuffer::<Rgba<u8>, _>::from_raw(1024, 1024, &image_buffer_content[..]).unwrap();
+    image.save("output.png").unwrap();
     // End of compute shenanigans
     //////////////////////////////////////////////////////////////////////
 
