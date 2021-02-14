@@ -60,6 +60,8 @@ const ENABLE_VALIDATION_LAYERS: bool = false;
 const WIDTH: u32 = 800;
 const HEIGHT: u32 = 600;
 
+const SIZE: u32 = 2048;
+
 fn main() {
     let vulkan_instance = create_vulkan_instance();
     let event_loop = EventLoop::new();
@@ -127,19 +129,14 @@ fn main() {
 
 
     //////////////////////////////////////////////////////////////////////
+    //////////////////////////////////////////////////////////////////////
+    //////////////////////////////////////////////////////////////////////
     // Start of compute shenanigans
-    let data_iter = 0..65536;
-    let data_buffer = CpuAccessibleBuffer::from_iter(
-        device.clone(),
-        BufferUsage::all(),
-        false,
-        data_iter)
-        .expect("Failed to create data buffer!");
 
     mod compute_shader {
         vulkano_shaders::shader! {
             ty: "compute",
-            path: "src/compute.glsl"
+            path: "src/mandelbrot.glsl"
         }
     }
     let compute_shader_module = compute_shader::Shader::load(device.clone())
@@ -148,73 +145,57 @@ fn main() {
     let compute_pipeline = Arc::new(ComputePipeline::new(device.clone(), &compute_shader_module.main_entry_point(), &(), None)
         .expect("Failed to create compute pipeline!"));
 
-    let pipeline_layout = compute_pipeline.layout().descriptor_set_layout(0).unwrap();
-    let descriptor_set = Arc::new(
-        PersistentDescriptorSet::start(pipeline_layout.clone())
-        .add_buffer(data_buffer.clone()).unwrap()
-        .build().unwrap()
-    );
-
-    let mut buffer_builder = AutoCommandBufferBuilder::primary_one_time_submit(
-        device.clone(),
-        queue.family())
-        .expect("Failed to create command buffer builder");
-    buffer_builder
-        .dispatch([1024, 1, 1],
-                  compute_pipeline.clone(),
-                  descriptor_set.clone(),
-                  ())
-        .unwrap();
-
-    let command_buffer = buffer_builder.build()
-        .expect("Failed to build command buffer!");
-
-    let finished = command_buffer.execute(queue.clone()).unwrap();
-    finished.then_signal_fence_and_flush().unwrap().wait(None).unwrap();
-
-    // Check the computation has been done
-    let buffer_content = data_buffer.read().unwrap();
-    for n in 0..65536u32 {
-        assert_eq!(buffer_content[n as usize], n * 12);
-    }
-
     let storage_image = StorageImage::new(
         device.clone(),
         Dimensions::Dim2d {
-            width: 1024,
-            height: 1024
+            width: SIZE,
+            height: SIZE
         },
         Format::R8G8B8A8Unorm,
         Some(queue.family())
     ).expect("Failed to create storage image!");
 
+    let pipeline_layout = compute_pipeline.layout().descriptor_set_layout(0).unwrap();
+    let descriptor_set = Arc::new(PersistentDescriptorSet::start(pipeline_layout.clone())
+        .add_image(storage_image.clone()).unwrap()
+        .build().unwrap()
+    );
+
     let image_buffer = CpuAccessibleBuffer::from_iter(
         device.clone(),
         BufferUsage::all(),
         false,
-        (0..1024 * 1024 * 4).map(|_| 0u8))
+        (0..SIZE * SIZE * 4).map(|_| 0u8))
         .expect("Failed to create image buffer!");
 
-    let mut another_command_buffer_builder = AutoCommandBufferBuilder::primary_one_time_submit(
+    let mut command_buffer_builder = AutoCommandBufferBuilder::primary_one_time_submit(
         device.clone(),
         queue.family()
     ).unwrap();
-    another_command_buffer_builder
-        .clear_color_image(
-        storage_image.clone(),
-        ClearValue::Float([1.0, 0.0, 0.0, 1.0]))
+    command_buffer_builder
+        .dispatch(
+            [SIZE / 8, SIZE / 8, 1],
+            compute_pipeline.clone(),
+            descriptor_set.clone(),
+            ()
+        )
         .unwrap()
         .copy_image_to_buffer(
-        storage_image.clone(),
-        image_buffer.clone())
+            storage_image.clone(),
+            image_buffer.clone()
+        )
         .unwrap();
-    let another_command_buffer = another_command_buffer_builder.build().unwrap();
-    let finished2 = another_command_buffer.execute(queue.clone()).unwrap();
-    finished2.then_signal_fence_and_flush().unwrap().wait(None).unwrap();
+
+    let command_buffer = command_buffer_builder.build().unwrap();
+    let finished = command_buffer.execute(queue.clone()).unwrap();
+    finished.then_signal_fence_and_flush().unwrap().wait(None).unwrap();
+
     let image_buffer_content = image_buffer.read().unwrap();
-    let image = ImageBuffer::<Rgba<u8>, _>::from_raw(1024, 1024, &image_buffer_content[..]).unwrap();
+    let image = ImageBuffer::<Rgba<u8>, _>::from_raw(SIZE, SIZE, &image_buffer_content[..]).unwrap();
     image.save("output.png").unwrap();
     // End of compute shenanigans
+    //////////////////////////////////////////////////////////////////////
+    //////////////////////////////////////////////////////////////////////
     //////////////////////////////////////////////////////////////////////
 
 
